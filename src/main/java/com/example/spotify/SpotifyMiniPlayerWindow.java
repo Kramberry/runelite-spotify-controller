@@ -53,8 +53,10 @@ class SpotifyMiniPlayerWindow
 
 	private static final int DEFAULT_WIDTH = 280;
 	private static final int DEFAULT_HEIGHT = 150;
-	private static final int MAX_DIMENSION = 500;
-	private static final int MIN_DIMENSION = 120;
+	// Deliberately small — this is meant to stay a "mini" player regardless of
+	// how large the source picture/GIF is. 500 (the original cap) was not mini.
+	private static final int MAX_DIMENSION = 220;
+	private static final int MIN_DIMENSION = 100;
 
 	private final Listener listener;
 
@@ -201,9 +203,74 @@ class SpotifyMiniPlayerWindow
 			}
 		});
 
+		JPanel volumeRow = new JPanel(new BorderLayout(4, 0));
+		volumeRow.setOpaque(false);
+		volumeRow.add(volumeSlider, BorderLayout.CENTER);
+		volumeRow.add(buildResizeGrip(), BorderLayout.EAST);
+
 		bar.add(transport, BorderLayout.NORTH);
-		bar.add(volumeSlider, BorderLayout.SOUTH);
+		bar.add(volumeRow, BorderLayout.SOUTH);
 		return bar;
+	}
+
+	/**
+	 * Small drag handle in the corner so the (undecorated, no OS resize
+	 * border) window can still be resized manually — an image/GIF background
+	 * is auto-fit small on load, but the user may still want it bigger/smaller.
+	 */
+	private JPanel buildResizeGrip()
+	{
+		JPanel grip = new JPanel()
+		{
+			@Override
+			protected void paintComponent(Graphics g)
+			{
+				Graphics2D g2 = (Graphics2D) g;
+				g2.setColor(new Color(220, 220, 220, 180));
+				int size = Math.min(getWidth(), getHeight());
+				for (int i = 1; i <= 3; i++)
+				{
+					int offset = i * (size / 4);
+					g2.drawLine(size - offset, size, size, size - offset);
+				}
+			}
+		};
+		grip.setOpaque(false);
+		grip.setPreferredSize(new Dimension(14, 14));
+		grip.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.SE_RESIZE_CURSOR));
+		installResizeDragging(grip);
+		return grip;
+	}
+
+	private void installResizeDragging(Component grip)
+	{
+		MouseAdapter resizeHandler = new MouseAdapter()
+		{
+			private Point mouseStart;
+			private Dimension sizeStart;
+
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				mouseStart = e.getLocationOnScreen();
+				sizeStart = window.getSize();
+			}
+
+			@Override
+			public void mouseDragged(MouseEvent e)
+			{
+				if (mouseStart == null)
+				{
+					return;
+				}
+				Point nowScreen = e.getLocationOnScreen();
+				int newWidth = Math.max(MIN_DIMENSION, sizeStart.width + (nowScreen.x - mouseStart.x));
+				int newHeight = Math.max(MIN_DIMENSION, sizeStart.height + (nowScreen.y - mouseStart.y));
+				window.setSize(newWidth, newHeight);
+			}
+		};
+		grip.addMouseListener(resizeHandler);
+		grip.addMouseMotionListener(resizeHandler);
 	}
 
 	private static JButton smallButton(String text)
