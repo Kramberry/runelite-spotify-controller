@@ -86,16 +86,26 @@ class SpotifyControllerPanel extends PluginPanel
 	private final JTextField searchField = new JTextField();
 	private final JButton searchButton = new JButton("Search");
 	private final JButton myPlaylistsButton = new JButton("My Playlists");
+	private final JLabel searchScopeLabel = new JLabel("Search: All of Spotify");
 	private final JPanel rowsContainer = new JPanel();
 	private final JLabel browseHintLabel = new JLabel(" ", SwingConstants.CENTER);
 
 	private static final String CARD_NOW_PLAYING = "nowPlaying";
 	private static final String CARD_BROWSE = "browse";
+	private static final String SEARCH_SCOPE_ALL = "Search: All of Spotify";
 
 	private String lastAlbumArtUrl;
 	private boolean currentlyPlaying;
 	private boolean suppressVolumeEvent;
 	private List<SpotifyPlaylist> lastPlaylists;
+
+	/**
+	 * Non-null only while viewing an opened playlist's track list — lets the
+	 * one search field filter within it (client-side, no API call) instead of
+	 * running a catalog-wide search.
+	 */
+	private SpotifyPlaylist currentPlaylist;
+	private List<SpotifyTrack> currentPlaylistTracks;
 
 	SpotifyControllerPanel(Listener listener)
 	{
@@ -243,6 +253,9 @@ class SpotifyControllerPanel extends PluginPanel
 		JPanel card = new JPanel(new BorderLayout(0, 6));
 		card.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
+		searchScopeLabel.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
+		searchScopeLabel.setFont(searchScopeLabel.getFont().deriveFont(9f));
+
 		JPanel searchRow = new JPanel(new BorderLayout(4, 0));
 		searchRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		searchField.addActionListener(e -> triggerSearch());
@@ -254,8 +267,9 @@ class SpotifyControllerPanel extends PluginPanel
 
 		JPanel topControls = new JPanel(new BorderLayout(0, 4));
 		topControls.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		topControls.add(searchRow, BorderLayout.NORTH);
-		topControls.add(myPlaylistsButton, BorderLayout.CENTER);
+		topControls.add(searchScopeLabel, BorderLayout.NORTH);
+		topControls.add(searchRow, BorderLayout.CENTER);
+		topControls.add(myPlaylistsButton, BorderLayout.SOUTH);
 
 		rowsContainer.setLayout(new BoxLayout(rowsContainer, BoxLayout.Y_AXIS));
 		rowsContainer.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -278,10 +292,37 @@ class SpotifyControllerPanel extends PluginPanel
 	private void triggerSearch()
 	{
 		String query = searchField.getText() == null ? "" : searchField.getText().trim();
+		if (currentPlaylist != null)
+		{
+			// Filtering the already-fetched track list — no network call needed,
+			// and an empty query just shows the full playlist again.
+			renderPlaylistTrackRows(filterTracks(currentPlaylistTracks, query));
+			return;
+		}
 		if (!query.isEmpty())
 		{
 			listener.onSearchRequested(query);
 		}
+	}
+
+	private static List<SpotifyTrack> filterTracks(List<SpotifyTrack> tracks, String query)
+	{
+		if (query.isEmpty())
+		{
+			return tracks;
+		}
+		String needle = query.toLowerCase();
+		List<SpotifyTrack> result = new java.util.ArrayList<>();
+		for (SpotifyTrack track : tracks)
+		{
+			boolean nameMatches = track.name != null && track.name.toLowerCase().contains(needle);
+			boolean artistMatches = track.artistName != null && track.artistName.toLowerCase().contains(needle);
+			if (nameMatches || artistMatches)
+			{
+				result.add(track);
+			}
+		}
+		return result;
 	}
 
 	void showDisconnected()
@@ -362,6 +403,10 @@ class SpotifyControllerPanel extends PluginPanel
 
 	void showBrowsePlaylists(List<SpotifyPlaylist> playlists)
 	{
+		currentPlaylist = null;
+		currentPlaylistTracks = null;
+		searchScopeLabel.setText(SEARCH_SCOPE_ALL);
+
 		lastPlaylists = playlists;
 		rowsContainer.removeAll();
 		if (playlists.isEmpty())
@@ -377,6 +422,15 @@ class SpotifyControllerPanel extends PluginPanel
 
 	void showPlaylistTracks(SpotifyPlaylist playlist, List<SpotifyTrack> tracks)
 	{
+		currentPlaylist = playlist;
+		currentPlaylistTracks = tracks;
+		searchScopeLabel.setText("Search: " + playlist.name);
+		renderPlaylistTrackRows(tracks);
+	}
+
+	private void renderPlaylistTrackRows(List<SpotifyTrack> tracks)
+	{
+		SpotifyPlaylist playlist = currentPlaylist;
 		rowsContainer.removeAll();
 		addRow("◀ Back to Playlists", null, () ->
 		{
@@ -398,6 +452,10 @@ class SpotifyControllerPanel extends PluginPanel
 
 	void showSearchResults(List<SpotifyTrack> tracks)
 	{
+		currentPlaylist = null;
+		currentPlaylistTracks = null;
+		searchScopeLabel.setText(SEARCH_SCOPE_ALL);
+
 		rowsContainer.removeAll();
 		if (tracks.isEmpty())
 		{

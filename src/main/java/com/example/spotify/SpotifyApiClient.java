@@ -260,14 +260,17 @@ class SpotifyApiClient
 				.build();
 			enqueue(request, onResult, response ->
 			{
+				String bodyString = response.body() != null ? response.body().string() : "";
 				try
 				{
-					String bodyString = response.body() != null ? response.body().string() : "";
 					onJson.accept(gson.fromJson(bodyString, JsonObject.class));
 				}
 				catch (Exception e)
 				{
-					log.warn("Failed to parse Spotify response", e);
+					// Distinguishes a real client-side parsing bug (logged with the
+					// body that broke it) from an actual network/HTTP failure, both
+					// of which used to collapse into the same generic message.
+					log.warn("Failed to parse Spotify response from {}: {}", request.url(), bodyString, e);
 					onResult.accept(Result.NETWORK_ERROR);
 				}
 			});
@@ -307,6 +310,7 @@ class SpotifyApiClient
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
+				log.debug("Spotify request failed: {}", call.request().url(), e);
 				onResult.accept(Result.NETWORK_ERROR);
 			}
 
@@ -349,6 +353,15 @@ class SpotifyApiClient
 					}
 					if (!r.isSuccessful())
 					{
+						try
+						{
+							log.debug("Spotify {} on {}: {}", r.code(), r.request().url(),
+								r.body() != null ? r.body().string() : "(no body)");
+						}
+						catch (IOException ignored)
+						{
+							// best-effort diagnostics only
+						}
 						onResult.accept(Result.NETWORK_ERROR);
 						return;
 					}
@@ -403,7 +416,7 @@ class SpotifyApiClient
 		}
 
 		String id = item.has("id") && !item.get("id").isJsonNull() ? item.get("id").getAsString() : "";
-		String name = item.has("name") ? item.get("name").getAsString() : "";
+		String name = item.has("name") && !item.get("name").isJsonNull() ? item.get("name").getAsString() : "";
 		String uri = item.has("uri") && !item.get("uri").isJsonNull() ? item.get("uri").getAsString() : "";
 		long durationMs = item.has("duration_ms") ? item.get("duration_ms").getAsLong() : 0;
 
@@ -414,11 +427,20 @@ class SpotifyApiClient
 			StringBuilder sb = new StringBuilder();
 			for (int i = 0; i < artists.size(); i++)
 			{
-				if (i > 0)
+				if (!artists.get(i).isJsonObject())
+				{
+					continue;
+				}
+				JsonObject artist = artists.get(i).getAsJsonObject();
+				if (!artist.has("name") || artist.get("name").isJsonNull())
+				{
+					continue;
+				}
+				if (sb.length() > 0)
 				{
 					sb.append(", ");
 				}
-				sb.append(artists.get(i).getAsJsonObject().get("name").getAsString());
+				sb.append(artist.get("name").getAsString());
 			}
 			artistName = sb.toString();
 		}
