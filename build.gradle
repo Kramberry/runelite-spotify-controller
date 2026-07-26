@@ -1,0 +1,27 @@
+plugins {
+    id 'java'
+}
+
+repositories {
+    mavenCentral()
+    maven {
+        url = 'https://repo.runelite.net'
+    }
+}
+
+dependencies {
+    compileOnly group: 'net.runelite', name: 'client', version: '1.12.32'
+    compileOnly 'org.projectlombok:lombok:1.18.30'
+    annotationProcessor 'org.projectlombok:lombok:1.18.30'
+}
+
+group = 'com.example'
+version = '1.0'
+
+compileJava {
+    sourceCompatibility = '11'
+    targetCompatibility = '11'
+    // Source files are UTF-8; without this javac falls back to the platform
+    // default encoding, which can't represent some UI glyphs (e.g. U+23F8).
+    options.encoding = 'UTF-8'
+}
