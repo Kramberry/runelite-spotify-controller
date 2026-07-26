@@ -310,7 +310,9 @@ class SpotifyApiClient
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
-				log.debug("Spotify request failed: {}", call.request().url(), e);
+				// RuneLite's default log level is INFO, so this must be warn (not
+				// debug) to actually land in client.log for later diagnosis.
+				log.warn("Spotify request failed: {}", call.request().url(), e);
 				onResult.accept(Result.NETWORK_ERROR);
 			}
 
@@ -336,7 +338,7 @@ class SpotifyApiClient
 						// resource. Log the real reason so it's diagnosable.
 						try
 						{
-							log.debug("Spotify 403 on {}: {}", r.request().url(),
+							log.warn("Spotify 403 on {}: {}", r.request().url(),
 								r.body() != null ? r.body().string() : "(no body)");
 						}
 						catch (IOException ignored)
@@ -355,7 +357,7 @@ class SpotifyApiClient
 					{
 						try
 						{
-							log.debug("Spotify {} on {}: {}", r.code(), r.request().url(),
+							log.warn("Spotify {} on {}: {}", r.code(), r.request().url(),
 								r.body() != null ? r.body().string() : "(no body)");
 						}
 						catch (IOException ignored)
