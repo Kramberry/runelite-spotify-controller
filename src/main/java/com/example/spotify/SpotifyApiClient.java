@@ -131,13 +131,15 @@ class SpotifyApiClient
 		getJson(url, json -> onPlaylists.accept(parsePlaylists(json)), onResult);
 	}
 
+	/**
+	 * Uses "Get Playlist" (GET /v1/playlists/{id}) rather than the dedicated
+	 * .../tracks sub-resource — Spotify's docs flag that sub-resource as
+	 * deprecated, and newly-registered apps got 403s calling it. The full
+	 * playlist object embeds the same track list, just nested one level in.
+	 */
 	void getPlaylistTracks(String playlistId, Consumer<List<SpotifyTrack>> onTracks, Consumer<Result> onResult)
 	{
-		String url = HttpUrl.parse(PLAYLIST_URL + playlistId + "/tracks").newBuilder()
-			.addQueryParameter("limit", "100")
-			.build()
-			.toString();
-		getJson(url, json -> onTracks.accept(parsePlaylistTracks(json)), onResult);
+		getJson(PLAYLIST_URL + playlistId, json -> onTracks.accept(parsePlaylistTracks(json)), onResult);
 	}
 
 	void search(String query, Consumer<List<SpotifyTrack>> onTracks, Consumer<Result> onResult)
@@ -477,29 +479,40 @@ class SpotifyApiClient
 	 * collection is keyed "tracks" (the long-standing field) or "items" (a
 	 * claimed rename we couldn't independently confirm) — check both.
 	 */
-	private static int extractTrackCount(JsonObject playlist)
+	private static JsonObject extractTracksContainer(JsonObject playlist)
 	{
-		JsonObject container = null;
 		if (playlist.has("tracks") && playlist.get("tracks").isJsonObject())
 		{
-			container = playlist.getAsJsonObject("tracks");
+			return playlist.getAsJsonObject("tracks");
 		}
-		else if (playlist.has("items") && playlist.get("items").isJsonObject())
+		if (playlist.has("items") && playlist.get("items").isJsonObject())
 		{
-			container = playlist.getAsJsonObject("items");
+			return playlist.getAsJsonObject("items");
 		}
+		return null;
+	}
+
+	private static int extractTrackCount(JsonObject playlist)
+	{
+		JsonObject container = extractTracksContainer(playlist);
 		return container != null && container.has("total") ? container.get("total").getAsInt() : 0;
 	}
 
+	/**
+	 * json here is a full Playlist object (from "Get Playlist") — its track
+	 * list is nested one level in, under the same ambiguous "tracks"/"items"
+	 * key handled by extractTracksContainer above.
+	 */
 	private static List<SpotifyTrack> parsePlaylistTracks(JsonObject json)
 	{
 		List<SpotifyTrack> result = new ArrayList<>();
-		if (!json.has("items") || !json.get("items").isJsonArray())
+		JsonObject container = extractTracksContainer(json);
+		if (container == null || !container.has("items") || !container.get("items").isJsonArray())
 		{
 			return result;
 		}
 
-		for (JsonElement e : json.getAsJsonArray("items"))
+		for (JsonElement e : container.getAsJsonArray("items"))
 		{
 			if (!e.isJsonObject())
 			{
