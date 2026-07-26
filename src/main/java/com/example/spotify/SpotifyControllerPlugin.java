@@ -11,6 +11,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import javax.imageio.ImageIO;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
@@ -306,6 +307,70 @@ public class SpotifyControllerPlugin extends Plugin
 		public void onVolumeChanged(int volumePercent)
 		{
 			apiClient.setVolume(volumePercent, result -> onControlResult(result));
+		}
+
+		@Override
+		public void onBrowsePlaylistsRequested()
+		{
+			SwingUtilities.invokeLater(() -> panel.showStatusMessage("Loading playlists…"));
+			apiClient.getPlaylists(
+				playlists -> SwingUtilities.invokeLater(() ->
+				{
+					panel.showStatusMessage(" ");
+					panel.showBrowsePlaylists(playlists);
+				}),
+				this::onBrowseResult
+			);
+		}
+
+		@Override
+		public void onSearchRequested(String query)
+		{
+			SwingUtilities.invokeLater(() -> panel.showStatusMessage("Searching…"));
+			apiClient.search(query,
+				tracks -> SwingUtilities.invokeLater(() ->
+				{
+					panel.showStatusMessage(" ");
+					panel.showSearchResults(tracks);
+				}),
+				this::onBrowseResult
+			);
+		}
+
+		@Override
+		public void onPlaylistOpened(SpotifyPlaylist playlist)
+		{
+			SwingUtilities.invokeLater(() -> panel.showStatusMessage("Loading tracks…"));
+			apiClient.getPlaylistTracks(playlist.id,
+				tracks -> SwingUtilities.invokeLater(() ->
+				{
+					panel.showStatusMessage(" ");
+					panel.showPlaylistTracks(playlist, tracks);
+				}),
+				this::onBrowseResult
+			);
+		}
+
+		@Override
+		public void onTrackSelected(String trackUri, String playlistContextUri)
+		{
+			Consumer<SpotifyApiClient.Result> onResult = this::onControlResult;
+			if (playlistContextUri != null)
+			{
+				apiClient.playTrackInPlaylist(playlistContextUri, trackUri, onResult);
+			}
+			else
+			{
+				apiClient.playTrack(trackUri, onResult);
+			}
+		}
+
+		private void onBrowseResult(SpotifyApiClient.Result result)
+		{
+			if (result != SpotifyApiClient.Result.SUCCESS)
+			{
+				handlePollResult(result);
+			}
 		}
 
 		private void onControlResult(SpotifyApiClient.Result result)

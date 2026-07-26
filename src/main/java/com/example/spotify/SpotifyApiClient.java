@@ -2,13 +2,17 @@ package com.example.spotify;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.HttpUrl;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -35,6 +39,10 @@ class SpotifyApiClient
 	}
 
 	private static final String PLAYER_URL = "https://api.spotify.com/v1/me/player";
+	private static final String PLAYLISTS_URL = "https://api.spotify.com/v1/me/playlists";
+	private static final String PLAYLIST_URL = "https://api.spotify.com/v1/playlists/";
+	private static final String SEARCH_URL = "https://api.spotify.com/v1/search";
+	private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json; charset=utf-8");
 
 	private final OkHttpClient httpClient;
 	private final Gson gson;
@@ -114,6 +122,71 @@ class SpotifyApiClient
 		putNoBody(url.toString(), onResult);
 	}
 
+	void getPlaylists(Consumer<List<SpotifyPlaylist>> onPlaylists, Consumer<Result> onResult)
+	{
+		String url = HttpUrl.parse(PLAYLISTS_URL).newBuilder()
+			.addQueryParameter("limit", "50")
+			.build()
+			.toString();
+		getJson(url, json -> onPlaylists.accept(parsePlaylists(json)), onResult);
+	}
+
+	void getPlaylistTracks(String playlistId, Consumer<List<SpotifyTrack>> onTracks, Consumer<Result> onResult)
+	{
+		String url = HttpUrl.parse(PLAYLIST_URL + playlistId + "/tracks").newBuilder()
+			.addQueryParameter("limit", "100")
+			.build()
+			.toString();
+		getJson(url, json -> onTracks.accept(parsePlaylistTracks(json)), onResult);
+	}
+
+	void search(String query, Consumer<List<SpotifyTrack>> onTracks, Consumer<Result> onResult)
+	{
+		String url = HttpUrl.parse(SEARCH_URL).newBuilder()
+			.addQueryParameter("type", "track")
+			.addQueryParameter("limit", "20")
+			.addQueryParameter("q", query)
+			.build()
+			.toString();
+		getJson(url, json ->
+		{
+			List<SpotifyTrack> results = new ArrayList<>();
+			JsonObject tracksContainer = json.has("tracks") && json.get("tracks").isJsonObject()
+				? json.getAsJsonObject("tracks") : null;
+			if (tracksContainer != null && tracksContainer.has("items"))
+			{
+				for (JsonElement e : tracksContainer.getAsJsonArray("items"))
+				{
+					SpotifyTrack t = parseTrackObject(e.isJsonObject() ? e.getAsJsonObject() : null);
+					if (t != null)
+					{
+						results.add(t);
+					}
+				}
+			}
+			onTracks.accept(results);
+		}, onResult);
+	}
+
+	void playTrack(String trackUri, Consumer<Result> onResult)
+	{
+		JsonObject body = new JsonObject();
+		JsonArray uris = new JsonArray();
+		uris.add(trackUri);
+		body.add("uris", uris);
+		putJson(PLAYER_URL + "/play", body, onResult);
+	}
+
+	void playTrackInPlaylist(String playlistUri, String trackUri, Consumer<Result> onResult)
+	{
+		JsonObject body = new JsonObject();
+		body.addProperty("context_uri", playlistUri);
+		JsonObject offset = new JsonObject();
+		offset.addProperty("uri", trackUri);
+		body.add("offset", offset);
+		putJson(PLAYER_URL + "/play", body, onResult);
+	}
+
 	/**
 	 * Album art is served from Spotify's public image CDN — no auth header needed.
 	 */
@@ -169,6 +242,44 @@ class SpotifyApiClient
 				.url(url)
 				.header("Authorization", "Bearer " + token)
 				.post(RequestBody.create(null, new byte[0]))
+				.build();
+			enqueue(request, onResult, response -> onResult.accept(Result.SUCCESS));
+		});
+	}
+
+	private void getJson(String url, Consumer<JsonObject> onJson, Consumer<Result> onResult)
+	{
+		withToken(onResult, token ->
+		{
+			Request request = new Request.Builder()
+				.url(url)
+				.header("Authorization", "Bearer " + token)
+				.get()
+				.build();
+			enqueue(request, onResult, response ->
+			{
+				try
+				{
+					String bodyString = response.body() != null ? response.body().string() : "";
+					onJson.accept(gson.fromJson(bodyString, JsonObject.class));
+				}
+				catch (Exception e)
+				{
+					log.warn("Failed to parse Spotify response", e);
+					onResult.accept(Result.NETWORK_ERROR);
+				}
+			});
+		});
+	}
+
+	private void putJson(String url, JsonObject body, Consumer<Result> onResult)
+	{
+		withToken(onResult, token ->
+		{
+			Request request = new Request.Builder()
+				.url(url)
+				.header("Authorization", "Bearer " + token)
+				.put(RequestBody.create(JSON_MEDIA_TYPE, gson.toJson(body)))
 				.build();
 			enqueue(request, onResult, response -> onResult.accept(Result.SUCCESS));
 		});
@@ -240,42 +351,8 @@ class SpotifyApiClient
 
 	private static SpotifyPlaybackState parsePlaybackState(JsonObject json)
 	{
-		JsonObject item = json.has("item") && !json.get("item").isJsonNull() ? json.getAsJsonObject("item") : null;
-
-		String trackName = "";
-		String artistName = "";
-		String albumArtUrl = null;
-		long durationMs = 0;
-
-		if (item != null)
-		{
-			trackName = item.has("name") ? item.get("name").getAsString() : "";
-			durationMs = item.has("duration_ms") ? item.get("duration_ms").getAsLong() : 0;
-
-			if (item.has("artists") && item.get("artists").isJsonArray())
-			{
-				JsonArray artists = item.getAsJsonArray("artists");
-				StringBuilder sb = new StringBuilder();
-				for (int i = 0; i < artists.size(); i++)
-				{
-					if (i > 0)
-					{
-						sb.append(", ");
-					}
-					sb.append(artists.get(i).getAsJsonObject().get("name").getAsString());
-				}
-				artistName = sb.toString();
-			}
-
-			if (item.has("album") && item.getAsJsonObject("album").has("images"))
-			{
-				JsonArray images = item.getAsJsonObject("album").getAsJsonArray("images");
-				if (images.size() > 0)
-				{
-					albumArtUrl = images.get(0).getAsJsonObject().get("url").getAsString();
-				}
-			}
-		}
+		JsonObject itemJson = json.has("item") && !json.get("item").isJsonNull() ? json.getAsJsonObject("item") : null;
+		SpotifyTrack track = parseTrackObject(itemJson);
 
 		long progressMs = json.has("progress_ms") && !json.get("progress_ms").isJsonNull()
 			? json.get("progress_ms").getAsLong() : 0;
@@ -290,6 +367,151 @@ class SpotifyApiClient
 			}
 		}
 
-		return new SpotifyPlaybackState(trackName, artistName, albumArtUrl, progressMs, durationMs, isPlaying, volumePercent);
+		return new SpotifyPlaybackState(
+			track != null ? track.name : "",
+			track != null ? track.artistName : "",
+			track != null ? track.albumArtUrl : null,
+			progressMs,
+			track != null ? track.durationMs : 0,
+			isPlaying,
+			volumePercent);
+	}
+
+	/**
+	 * Shared by the now-playing item, playlist-tracks entries, and search
+	 * results — all three are the same Spotify "track object" shape.
+	 */
+	private static SpotifyTrack parseTrackObject(JsonObject item)
+	{
+		if (item == null)
+		{
+			return null;
+		}
+
+		String id = item.has("id") && !item.get("id").isJsonNull() ? item.get("id").getAsString() : "";
+		String name = item.has("name") ? item.get("name").getAsString() : "";
+		String uri = item.has("uri") && !item.get("uri").isJsonNull() ? item.get("uri").getAsString() : "";
+		long durationMs = item.has("duration_ms") ? item.get("duration_ms").getAsLong() : 0;
+
+		String artistName = "";
+		if (item.has("artists") && item.get("artists").isJsonArray())
+		{
+			JsonArray artists = item.getAsJsonArray("artists");
+			StringBuilder sb = new StringBuilder();
+			for (int i = 0; i < artists.size(); i++)
+			{
+				if (i > 0)
+				{
+					sb.append(", ");
+				}
+				sb.append(artists.get(i).getAsJsonObject().get("name").getAsString());
+			}
+			artistName = sb.toString();
+		}
+
+		String albumArtUrl = null;
+		if (item.has("album") && item.get("album").isJsonObject())
+		{
+			JsonObject album = item.getAsJsonObject("album");
+			if (album.has("images") && album.get("images").isJsonArray())
+			{
+				JsonArray images = album.getAsJsonArray("images");
+				if (images.size() > 0 && images.get(0).isJsonObject())
+				{
+					albumArtUrl = images.get(0).getAsJsonObject().get("url").getAsString();
+				}
+			}
+		}
+
+		return new SpotifyTrack(id, name, artistName, uri, durationMs, albumArtUrl);
+	}
+
+	private static List<SpotifyPlaylist> parsePlaylists(JsonObject json)
+	{
+		List<SpotifyPlaylist> result = new ArrayList<>();
+		if (!json.has("items") || !json.get("items").isJsonArray())
+		{
+			return result;
+		}
+
+		for (JsonElement e : json.getAsJsonArray("items"))
+		{
+			if (!e.isJsonObject())
+			{
+				continue;
+			}
+			JsonObject p = e.getAsJsonObject();
+			String id = p.has("id") && !p.get("id").isJsonNull() ? p.get("id").getAsString() : "";
+			String name = p.has("name") ? p.get("name").getAsString() : "";
+			String uri = p.has("uri") && !p.get("uri").isJsonNull() ? p.get("uri").getAsString() : "";
+
+			String imageUrl = null;
+			if (p.has("images") && p.get("images").isJsonArray())
+			{
+				JsonArray images = p.getAsJsonArray("images");
+				if (images.size() > 0 && images.get(0).isJsonObject())
+				{
+					imageUrl = images.get(0).getAsJsonObject().get("url").getAsString();
+				}
+			}
+
+			result.add(new SpotifyPlaylist(id, name, uri, imageUrl, extractTrackCount(p)));
+		}
+		return result;
+	}
+
+	/**
+	 * Spotify's own docs disagreed across pages on whether a playlist's track
+	 * collection is keyed "tracks" (the long-standing field) or "items" (a
+	 * claimed rename we couldn't independently confirm) — check both.
+	 */
+	private static int extractTrackCount(JsonObject playlist)
+	{
+		JsonObject container = null;
+		if (playlist.has("tracks") && playlist.get("tracks").isJsonObject())
+		{
+			container = playlist.getAsJsonObject("tracks");
+		}
+		else if (playlist.has("items") && playlist.get("items").isJsonObject())
+		{
+			container = playlist.getAsJsonObject("items");
+		}
+		return container != null && container.has("total") ? container.get("total").getAsInt() : 0;
+	}
+
+	private static List<SpotifyTrack> parsePlaylistTracks(JsonObject json)
+	{
+		List<SpotifyTrack> result = new ArrayList<>();
+		if (!json.has("items") || !json.get("items").isJsonArray())
+		{
+			return result;
+		}
+
+		for (JsonElement e : json.getAsJsonArray("items"))
+		{
+			if (!e.isJsonObject())
+			{
+				continue;
+			}
+			JsonObject entry = e.getAsJsonObject();
+
+			// Same "track" vs "item" ambiguity as extractTrackCount above.
+			JsonObject trackJson = null;
+			if (entry.has("track") && entry.get("track").isJsonObject())
+			{
+				trackJson = entry.getAsJsonObject("track");
+			}
+			else if (entry.has("item") && entry.get("item").isJsonObject())
+			{
+				trackJson = entry.getAsJsonObject("item");
+			}
+
+			SpotifyTrack track = parseTrackObject(trackJson);
+			if (track != null && !track.uri.isEmpty())
+			{
+				result.add(track);
+			}
+		}
+		return result;
 	}
 }

@@ -45,7 +45,8 @@ class SpotifyAuthManager
 	private static final int CALLBACK_PORT = 8888;
 	private static final String REDIRECT_URI = "http://127.0.0.1:" + CALLBACK_PORT + "/callback";
 	private static final String SCOPES =
-		"user-read-playback-state user-modify-playback-state user-read-currently-playing";
+		"user-read-playback-state user-modify-playback-state user-read-currently-playing "
+			+ "playlist-read-private playlist-read-collaborative";
 	private static final long AUTH_TIMEOUT_MS = 120_000;
 	private static final long EXPIRY_SAFETY_MARGIN_MS = 60_000;
 
