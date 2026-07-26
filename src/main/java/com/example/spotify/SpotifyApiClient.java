@@ -41,7 +41,6 @@ class SpotifyApiClient
 	private static final String PLAYER_URL = "https://api.spotify.com/v1/me/player";
 	private static final String PLAYLISTS_URL = "https://api.spotify.com/v1/me/playlists";
 	private static final String PLAYLIST_URL = "https://api.spotify.com/v1/playlists/";
-	private static final String SEARCH_URL = "https://api.spotify.com/v1/search";
 	private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json; charset=utf-8");
 
 	private final OkHttpClient httpClient;
@@ -140,43 +139,6 @@ class SpotifyApiClient
 	void getPlaylistTracks(String playlistId, Consumer<List<SpotifyTrack>> onTracks, Consumer<Result> onResult)
 	{
 		getJson(PLAYLIST_URL + playlistId, json -> onTracks.accept(parsePlaylistTracks(json)), onResult);
-	}
-
-	void search(String query, Consumer<List<SpotifyTrack>> onTracks, Consumer<Result> onResult)
-	{
-		String url = HttpUrl.parse(SEARCH_URL).newBuilder()
-			.addQueryParameter("type", "track")
-			.addQueryParameter("limit", "20")
-			.addQueryParameter("q", query)
-			.build()
-			.toString();
-		getJson(url, json ->
-		{
-			List<SpotifyTrack> results = new ArrayList<>();
-			JsonObject tracksContainer = json.has("tracks") && json.get("tracks").isJsonObject()
-				? json.getAsJsonObject("tracks") : null;
-			if (tracksContainer != null && tracksContainer.has("items"))
-			{
-				for (JsonElement e : tracksContainer.getAsJsonArray("items"))
-				{
-					SpotifyTrack t = parseTrackObject(e.isJsonObject() ? e.getAsJsonObject() : null);
-					if (t != null)
-					{
-						results.add(t);
-					}
-				}
-			}
-			onTracks.accept(results);
-		}, onResult);
-	}
-
-	void playTrack(String trackUri, Consumer<Result> onResult)
-	{
-		JsonObject body = new JsonObject();
-		JsonArray uris = new JsonArray();
-		uris.add(trackUri);
-		body.add("uris", uris);
-		putJson(PLAYER_URL + "/play", body, onResult);
 	}
 
 	void playTrackInPlaylist(String playlistUri, String trackUri, Consumer<Result> onResult)

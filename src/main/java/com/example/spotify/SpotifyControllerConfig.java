@@ -42,4 +42,15 @@ public interface SpotifyControllerConfig extends Config
 	{
 		return "";
 	}
+
+	@ConfigItem(
+		keyName = "backgroundImagePath",
+		name = "",
+		description = "",
+		hidden = true
+	)
+	default String backgroundImagePath()
+	{
+		return "";
+	}
 }

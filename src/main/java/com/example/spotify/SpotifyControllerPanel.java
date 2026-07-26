@@ -49,15 +49,11 @@ class SpotifyControllerPanel extends PluginPanel
 
 		void onBrowsePlaylistsRequested();
 
-		void onSearchRequested(String query);
-
 		void onPlaylistOpened(SpotifyPlaylist playlist);
 
-		/**
-		 * playlistContextUri is null when the track came from search results
-		 * rather than an opened playlist (no context to keep playing through).
-		 */
 		void onTrackSelected(String trackUri, String playlistContextUri);
+
+		void onToggleMiniPlayerClicked();
 	}
 
 	private static final int ART_SIZE = 150;
@@ -86,13 +82,14 @@ class SpotifyControllerPanel extends PluginPanel
 	private final JTextField searchField = new JTextField();
 	private final JButton searchButton = new JButton("Search");
 	private final JButton myPlaylistsButton = new JButton("My Playlists");
-	private final JLabel searchScopeLabel = new JLabel("Search: All of Spotify");
+	private final JLabel searchScopeLabel = new JLabel(SEARCH_SCOPE_NONE);
 	private final JPanel rowsContainer = new JPanel();
 	private final JLabel browseHintLabel = new JLabel(" ", SwingConstants.CENTER);
+	private final JButton miniPlayerToggleButton = new JButton("Show Mini Player");
 
 	private static final String CARD_NOW_PLAYING = "nowPlaying";
 	private static final String CARD_BROWSE = "browse";
-	private static final String SEARCH_SCOPE_ALL = "Search: All of Spotify";
+	private static final String SEARCH_SCOPE_NONE = "Open a playlist to search within it";
 
 	private String lastAlbumArtUrl;
 	private boolean currentlyPlaying;
@@ -163,9 +160,21 @@ class SpotifyControllerPanel extends PluginPanel
 		disconnectButton.setBorder(BorderFactory.createEmptyBorder(6, 0, 0, 0));
 		disconnectButton.addActionListener(e -> listener.onDisconnectClicked());
 
-		connectedPanel.add(tabBar, BorderLayout.NORTH);
+		miniPlayerToggleButton.addActionListener(e -> listener.onToggleMiniPlayerClicked());
+
+		JPanel topArea = new JPanel(new BorderLayout(0, 4));
+		topArea.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		topArea.add(tabBar, BorderLayout.NORTH);
+		topArea.add(miniPlayerToggleButton, BorderLayout.SOUTH);
+
+		connectedPanel.add(topArea, BorderLayout.NORTH);
 		connectedPanel.add(cardsPanel, BorderLayout.CENTER);
 		connectedPanel.add(disconnectButton, BorderLayout.SOUTH);
+	}
+
+	void setMiniPlayerOpen(boolean open)
+	{
+		miniPlayerToggleButton.setText(open ? "Hide Mini Player" : "Show Mini Player");
 	}
 
 	private void styleTabButton(JButton button)
@@ -260,6 +269,8 @@ class SpotifyControllerPanel extends PluginPanel
 		searchRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		searchField.addActionListener(e -> triggerSearch());
 		searchButton.addActionListener(e -> triggerSearch());
+		searchField.setEnabled(false);
+		searchButton.setEnabled(false);
 		searchRow.add(searchField, BorderLayout.CENTER);
 		searchRow.add(searchButton, BorderLayout.EAST);
 
@@ -281,7 +292,7 @@ class SpotifyControllerPanel extends PluginPanel
 
 		browseHintLabel.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
 		browseHintLabel.setFont(browseHintLabel.getFont().deriveFont(10f));
-		browseHintLabel.setText("Search or open My Playlists");
+		browseHintLabel.setText("Open My Playlists to get started");
 		rowsContainer.add(browseHintLabel);
 
 		card.add(topControls, BorderLayout.NORTH);
@@ -291,18 +302,14 @@ class SpotifyControllerPanel extends PluginPanel
 
 	private void triggerSearch()
 	{
-		String query = searchField.getText() == null ? "" : searchField.getText().trim();
-		if (currentPlaylist != null)
+		if (currentPlaylist == null)
 		{
-			// Filtering the already-fetched track list — no network call needed,
-			// and an empty query just shows the full playlist again.
-			renderPlaylistTrackRows(filterTracks(currentPlaylistTracks, query));
 			return;
 		}
-		if (!query.isEmpty())
-		{
-			listener.onSearchRequested(query);
-		}
+		String query = searchField.getText() == null ? "" : searchField.getText().trim();
+		// Filtering the already-fetched track list — no network call needed,
+		// and an empty query just shows the full playlist again.
+		renderPlaylistTrackRows(filterTracks(currentPlaylistTracks, query));
 	}
 
 	private static List<SpotifyTrack> filterTracks(List<SpotifyTrack> tracks, String query)
@@ -405,7 +412,9 @@ class SpotifyControllerPanel extends PluginPanel
 	{
 		currentPlaylist = null;
 		currentPlaylistTracks = null;
-		searchScopeLabel.setText(SEARCH_SCOPE_ALL);
+		searchScopeLabel.setText(SEARCH_SCOPE_NONE);
+		searchField.setEnabled(false);
+		searchButton.setEnabled(false);
 
 		lastPlaylists = playlists;
 		rowsContainer.removeAll();
@@ -425,6 +434,9 @@ class SpotifyControllerPanel extends PluginPanel
 		currentPlaylist = playlist;
 		currentPlaylistTracks = tracks;
 		searchScopeLabel.setText("Search: " + playlist.name);
+		searchField.setEnabled(true);
+		searchButton.setEnabled(true);
+		searchField.setText("");
 		renderPlaylistTrackRows(tracks);
 	}
 
@@ -446,24 +458,6 @@ class SpotifyControllerPanel extends PluginPanel
 		for (SpotifyTrack track : tracks)
 		{
 			addRow(track.name, track.artistName, () -> listener.onTrackSelected(track.uri, playlist.uri));
-		}
-		refreshRows();
-	}
-
-	void showSearchResults(List<SpotifyTrack> tracks)
-	{
-		currentPlaylist = null;
-		currentPlaylistTracks = null;
-		searchScopeLabel.setText(SEARCH_SCOPE_ALL);
-
-		rowsContainer.removeAll();
-		if (tracks.isEmpty())
-		{
-			addHintRow("No results found");
-		}
-		for (SpotifyTrack track : tracks)
-		{
-			addRow(track.name, track.artistName, () -> listener.onTrackSelected(track.uri, null));
 		}
 		refreshRows();
 	}

@@ -11,10 +11,11 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
 import javax.imageio.ImageIO;
 import javax.inject.Inject;
+import javax.swing.JFileChooser;
 import javax.swing.SwingUtilities;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.Plugin;
@@ -61,6 +62,7 @@ public class SpotifyControllerPlugin extends Plugin
 	private SpotifyAuthManager authManager;
 	private SpotifyApiClient apiClient;
 	private SpotifyControllerPanel panel;
+	private SpotifyMiniPlayerWindow miniPlayerWindow;
 	private NavigationButton navButton;
 
 	private ScheduledFuture<?> pollTask;
@@ -78,6 +80,7 @@ public class SpotifyControllerPlugin extends Plugin
 		authManager = new SpotifyAuthManager(okHttpClient, gson, configManager, config);
 		apiClient = new SpotifyApiClient(okHttpClient, gson, authManager);
 		panel = new SpotifyControllerPanel(new PanelListener());
+		miniPlayerWindow = new SpotifyMiniPlayerWindow(new MiniPlayerListener());
 
 		navButton = NavigationButton.builder()
 			.tooltip("Spotify Controller")
@@ -104,8 +107,27 @@ public class SpotifyControllerPlugin extends Plugin
 		stopPolling();
 		clientToolbar.removeNavigation(navButton);
 		authManager.shutDown();
+		if (miniPlayerWindow != null)
+		{
+			miniPlayerWindow.dispose();
+			miniPlayerWindow = null;
+		}
 		panel = null;
 		navButton = null;
+	}
+
+	private void toggleMiniPlayer()
+	{
+		boolean nowOpen = !miniPlayerWindow.isOpen();
+		if (nowOpen)
+		{
+			miniPlayerWindow.open(configManager.getConfiguration("spotifycontroller", "backgroundImagePath"));
+		}
+		else
+		{
+			miniPlayerWindow.close();
+		}
+		panel.setMiniPlayerOpen(nowOpen);
 	}
 
 	private void attemptSilentReconnect()
@@ -155,6 +177,10 @@ public class SpotifyControllerPlugin extends Plugin
 			{
 				panel.updatePlaybackState(state);
 				maybeFetchAlbumArt(state.albumArtUrl);
+				if (miniPlayerWindow.isOpen())
+				{
+					miniPlayerWindow.updatePlaybackState(state);
+				}
 			}),
 			result ->
 			{
@@ -329,20 +355,6 @@ public class SpotifyControllerPlugin extends Plugin
 		}
 
 		@Override
-		public void onSearchRequested(String query)
-		{
-			SwingUtilities.invokeLater(() -> panel.showStatusMessage("Searching…"));
-			apiClient.search(query,
-				tracks -> SwingUtilities.invokeLater(() ->
-				{
-					panel.showStatusMessage(" ");
-					panel.showSearchResults(tracks);
-				}),
-				this::onBrowseResult
-			);
-		}
-
-		@Override
 		public void onPlaylistOpened(SpotifyPlaylist playlist)
 		{
 			SwingUtilities.invokeLater(() -> panel.showStatusMessage("Loading tracks…"));
@@ -359,15 +371,13 @@ public class SpotifyControllerPlugin extends Plugin
 		@Override
 		public void onTrackSelected(String trackUri, String playlistContextUri)
 		{
-			Consumer<SpotifyApiClient.Result> onResult = this::onControlResult;
-			if (playlistContextUri != null)
-			{
-				apiClient.playTrackInPlaylist(playlistContextUri, trackUri, onResult);
-			}
-			else
-			{
-				apiClient.playTrack(trackUri, onResult);
-			}
+			apiClient.playTrackInPlaylist(playlistContextUri, trackUri, result -> onControlResult(result));
+		}
+
+		@Override
+		public void onToggleMiniPlayerClicked()
+		{
+			toggleMiniPlayer();
 		}
 
 		private void onBrowseResult(SpotifyApiClient.Result result)
@@ -377,18 +387,85 @@ public class SpotifyControllerPlugin extends Plugin
 				handlePollResult(result);
 			}
 		}
+	}
 
-		private void onControlResult(SpotifyApiClient.Result result)
+	/**
+	 * Shared by both PanelListener and MiniPlayerListener — same transport
+	 * buttons calling the same apiClient methods, just from two different
+	 * pieces of UI, so the result handling only needs to live once.
+	 */
+	private void onControlResult(SpotifyApiClient.Result result)
+	{
+		if (result == SpotifyApiClient.Result.SUCCESS)
 		{
-			if (result == SpotifyApiClient.Result.SUCCESS)
+			// Refresh state promptly instead of waiting for the next poll tick.
+			triggerImmediatePollIfIdle();
+		}
+		else
+		{
+			handlePollResult(result);
+		}
+	}
+
+	private class MiniPlayerListener implements SpotifyMiniPlayerWindow.Listener
+	{
+		@Override
+		public void onPlayPauseClicked(boolean currentlyPlaying)
+		{
+			if (currentlyPlaying)
 			{
-				// Refresh state promptly instead of waiting for the next poll tick.
-				triggerImmediatePollIfIdle();
+				apiClient.pause(SpotifyControllerPlugin.this::onControlResult);
 			}
 			else
 			{
-				handlePollResult(result);
+				apiClient.play(SpotifyControllerPlugin.this::onControlResult);
 			}
+		}
+
+		@Override
+		public void onPreviousClicked()
+		{
+			apiClient.previous(SpotifyControllerPlugin.this::onControlResult);
+		}
+
+		@Override
+		public void onNextClicked()
+		{
+			apiClient.next(SpotifyControllerPlugin.this::onControlResult);
+		}
+
+		@Override
+		public void onVolumeChanged(int volumePercent)
+		{
+			apiClient.setVolume(volumePercent, SpotifyControllerPlugin.this::onControlResult);
+		}
+
+		@Override
+		public void onChooseBackgroundClicked()
+		{
+			JFileChooser chooser = new JFileChooser();
+			chooser.setFileFilter(new FileNameExtensionFilter(
+				"Images and GIFs", "png", "jpg", "jpeg", "gif", "bmp"));
+			if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION)
+			{
+				String path = chooser.getSelectedFile().getAbsolutePath();
+				configManager.setConfiguration("spotifycontroller", "backgroundImagePath", path);
+				miniPlayerWindow.setBackgroundImage(path);
+			}
+		}
+
+		@Override
+		public void onResetBackgroundClicked()
+		{
+			configManager.unsetConfiguration("spotifycontroller", "backgroundImagePath");
+			miniPlayerWindow.setBackgroundImage(null);
+		}
+
+		@Override
+		public void onCloseClicked()
+		{
+			miniPlayerWindow.close();
+			panel.setMiniPlayerOpen(false);
 		}
 	}
 }
