@@ -325,6 +325,18 @@ class SpotifyApiClient
 					}
 					if (r.code() == 403)
 					{
+						// 403 here doesn't always mean "Premium required" — Spotify also
+						// returns it for missing scopes/permissions on a specific
+						// resource. Log the real reason so it's diagnosable.
+						try
+						{
+							log.debug("Spotify 403 on {}: {}", r.request().url(),
+								r.body() != null ? r.body().string() : "(no body)");
+						}
+						catch (IOException ignored)
+						{
+							// best-effort diagnostics only
+						}
 						onResult.accept(Result.FORBIDDEN);
 						return;
 					}

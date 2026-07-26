@@ -174,7 +174,12 @@ public class SpotifyControllerPlugin extends Plugin
 				SwingUtilities.invokeLater(() -> panel.showStatusMessage("No active device — open Spotify and start playback"));
 				return;
 			case FORBIDDEN:
-				SwingUtilities.invokeLater(() -> panel.showStatusMessage("Spotify Premium is required for playback control"));
+				// 403 covers two different real causes: Premium being required for
+				// playback control, or the connected session missing a scope/permission
+				// for this specific resource (e.g. playlist access before a reconnect).
+				SwingUtilities.invokeLater(() -> panel.showStatusMessage(
+					"Spotify denied that request — Premium is required for playback control, "
+						+ "or try Disconnect/Connect again to refresh permissions"));
 				return;
 			case RATE_LIMITED:
 				SwingUtilities.invokeLater(() -> panel.showStatusMessage("Rate limited by Spotify — backing off"));
