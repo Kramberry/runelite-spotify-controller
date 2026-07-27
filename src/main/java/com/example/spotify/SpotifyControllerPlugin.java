@@ -180,6 +180,7 @@ public class SpotifyControllerPlugin extends Plugin
 				if (miniPlayerWindow.isOpen())
 				{
 					miniPlayerWindow.updatePlaybackState(state);
+					miniPlayerWindow.keepOnTop();
 				}
 			}),
 			result ->

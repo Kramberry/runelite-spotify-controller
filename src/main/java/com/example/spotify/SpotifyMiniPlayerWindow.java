@@ -140,6 +140,23 @@ class SpotifyMiniPlayerWindow
 		backgroundPanel.setBackgroundImage(image);
 	}
 
+	/**
+	 * setAlwaysOnTop(true) is only asserted once, at window creation — on
+	 * Windows it can silently lose effect after another topmost/focus-stealing
+	 * window (the game client) re-asserts itself, especially once the mini
+	 * player hasn't been interacted with in a while, which reads as it having
+	 * "disappeared" (it's actually just sunk behind the client). Called
+	 * periodically off the existing poll cadence to re-assert it — no new
+	 * scheduling machinery needed.
+	 */
+	void keepOnTop()
+	{
+		if (window != null && window.isVisible())
+		{
+			window.setAlwaysOnTop(true);
+		}
+	}
+
 	void updatePlaybackState(SpotifyPlaybackState state)
 	{
 		if (window == null)
