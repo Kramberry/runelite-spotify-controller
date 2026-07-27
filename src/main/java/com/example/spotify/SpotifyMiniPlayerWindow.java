@@ -23,6 +23,7 @@ import javax.swing.JPopupMenu;
 import javax.swing.JSlider;
 import javax.swing.JWindow;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 import javax.swing.border.EmptyBorder;
 
 /**
@@ -62,10 +63,13 @@ class SpotifyMiniPlayerWindow
 
 	private JWindow window;
 	private BackgroundPanel backgroundPanel;
+	private JPanel controlBar;
 	private JButton prevButton;
 	private JButton playPauseButton;
 	private JButton nextButton;
 	private JSlider volumeSlider;
+	private MouseAdapter hoverTracker;
+	private Timer hideControlsTimer;
 
 	private boolean currentlyPlaying;
 	private boolean suppressVolumeEvent;
@@ -163,9 +167,27 @@ class SpotifyMiniPlayerWindow
 		window = new JWindow();
 		window.setAlwaysOnTop(true);
 
+		hoverTracker = new MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				showControls();
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				scheduleHideControls();
+			}
+		};
+
 		backgroundPanel = new BackgroundPanel();
 		backgroundPanel.setLayout(new BorderLayout());
-		backgroundPanel.add(buildControlBar(), BorderLayout.SOUTH);
+		controlBar = buildControlBar();
+		controlBar.setVisible(false);
+		backgroundPanel.add(controlBar, BorderLayout.SOUTH);
+		backgroundPanel.addMouseListener(hoverTracker);
 		window.setContentPane(backgroundPanel);
 
 		installDragging(backgroundPanel);
@@ -175,11 +197,46 @@ class SpotifyMiniPlayerWindow
 		window.setLocation(150, 150);
 	}
 
+	/**
+	 * Controls are hidden by default so an idle mini player just shows the
+	 * picture/GIF; they fade in on hover. A short delay (rather than hiding
+	 * immediately on mouseExited) absorbs the brief exit/re-entry blips Swing
+	 * fires when the cursor crosses from one child component to a sibling
+	 * (e.g. background panel -> a button), which would otherwise flicker.
+	 */
+	private void showControls()
+	{
+		if (hideControlsTimer != null)
+		{
+			hideControlsTimer.stop();
+		}
+		controlBar.setVisible(true);
+		backgroundPanel.revalidate();
+		backgroundPanel.repaint();
+	}
+
+	private void scheduleHideControls()
+	{
+		if (hideControlsTimer != null)
+		{
+			hideControlsTimer.stop();
+		}
+		hideControlsTimer = new Timer(200, e ->
+		{
+			controlBar.setVisible(false);
+			backgroundPanel.revalidate();
+			backgroundPanel.repaint();
+		});
+		hideControlsTimer.setRepeats(false);
+		hideControlsTimer.start();
+	}
+
 	private JPanel buildControlBar()
 	{
-		TranslucentPanel bar = new TranslucentPanel(new Color(0, 0, 0, 150));
+		TranslucentPanel bar = new TranslucentPanel(new Color(0, 0, 0, 70));
 		bar.setLayout(new BorderLayout(0, 2));
 		bar.setBorder(new EmptyBorder(4, 6, 4, 6));
+		bar.addMouseListener(hoverTracker);
 
 		JPanel transport = new JPanel(new GridLayout(1, 3, 4, 0));
 		transport.setOpaque(false);
@@ -189,12 +246,16 @@ class SpotifyMiniPlayerWindow
 		prevButton.addActionListener(e -> listener.onPreviousClicked());
 		playPauseButton.addActionListener(e -> listener.onPlayPauseClicked(currentlyPlaying));
 		nextButton.addActionListener(e -> listener.onNextClicked());
+		prevButton.addMouseListener(hoverTracker);
+		playPauseButton.addMouseListener(hoverTracker);
+		nextButton.addMouseListener(hoverTracker);
 		transport.add(prevButton);
 		transport.add(playPauseButton);
 		transport.add(nextButton);
 
 		volumeSlider = new JSlider(0, 100, 100);
 		volumeSlider.setOpaque(false);
+		volumeSlider.addMouseListener(hoverTracker);
 		volumeSlider.addChangeListener(e ->
 		{
 			if (!suppressVolumeEvent && !volumeSlider.getValueIsAdjusting())
@@ -238,6 +299,7 @@ class SpotifyMiniPlayerWindow
 		grip.setOpaque(false);
 		grip.setPreferredSize(new Dimension(14, 14));
 		grip.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.SE_RESIZE_CURSOR));
+		grip.addMouseListener(hoverTracker);
 		installResizeDragging(grip);
 		return grip;
 	}
@@ -278,6 +340,13 @@ class SpotifyMiniPlayerWindow
 		JButton button = new JButton(text);
 		button.setMargin(new Insets(2, 4, 2, 4));
 		button.setFocusPainted(false);
+		// No filled button chrome — just the glyph floating over the
+		// translucent bar, so it reads as part of a transparent overlay
+		// rather than opaque UI boxes sitting on top of the picture.
+		button.setContentAreaFilled(false);
+		button.setBorderPainted(false);
+		button.setOpaque(false);
+		button.setForeground(Color.WHITE);
 		return button;
 	}
 
