@@ -15,7 +15,6 @@ import java.awt.Point;
 import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
@@ -124,15 +123,32 @@ class SpotifyMiniPlayerWindow
 
 		if (path != null && !path.trim().isEmpty())
 		{
-			// ImageIcon (not ImageIO.read) is what makes an animated GIF actually
-			// animate — its AWT Toolkit-backed Image drives repaints through the
-			// component's ImageObserver on each new frame when painted via
-			// drawImage(img, x, y, w, h, observer). ImageIO would flatten to one frame.
-			ImageIcon icon = new ImageIcon(path);
-			if (icon.getIconWidth() > 0 && icon.getIconHeight() > 0)
+			// Toolkit.createImage() (not ImageIcon, not ImageIO.read) for two
+			// reasons: (1) it's still a Toolkit-backed Image, so an animated GIF
+			// actually animates — repaints get driven through the component's
+			// ImageObserver on each new frame when painted via
+			// drawImage(img, x, y, w, h, observer); ImageIO would flatten to one
+			// frame. (2) unlike ImageIcon(path)/Toolkit.getImage(path), which
+			// cache by file path for the life of the JVM, createImage() always
+			// reads fresh — needed here since the same path can be rewritten
+			// with different content (e.g. a regenerated GIF) between picks.
+			Image loaded = java.awt.Toolkit.getDefaultToolkit().createImage(path);
+			java.awt.MediaTracker tracker = new java.awt.MediaTracker(backgroundPanel);
+			tracker.addImage(loaded, 0);
+			try
 			{
-				image = icon.getImage();
-				size = scaledSize(icon.getIconWidth(), icon.getIconHeight());
+				tracker.waitForID(0);
+			}
+			catch (InterruptedException e)
+			{
+				Thread.currentThread().interrupt();
+			}
+			int w = loaded.getWidth(null);
+			int h = loaded.getHeight(null);
+			if (!tracker.isErrorID(0) && w > 0 && h > 0)
+			{
+				image = loaded;
+				size = scaledSize(w, h);
 			}
 		}
 
